@@ -610,25 +610,11 @@
                 <button onclick="disconnectRFIDReader()" class="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center shadow-sm">
                   <i class="fa-solid fa-plug-circle-xmark mr-2"></i> Disconnect
                 </button>
-                <div class="flex items-center space-x-1.5 ml-auto">
-                  <label class="text-[11px] font-bold text-slate-600">Baud:</label>
-                  <select id="rfidBaudRate" class="p-1.5 border rounded-xl text-xs bg-white font-mono outline-none shadow-sm">
-                    <option value="9600" selected>9600 (Uno/Nano)</option>
-                    <option value="115200">115200 (ESP32/Fast)</option>
-                    <option value="57600">57600</option>
-                    <option value="19200">19200</option>
-                  </select>
-                </div>
               </div>
 
               <div>
-                <label class="block text-[11px] font-bold text-slate-700 mb-1">RFID Card UID (Auto-read via RC522, USB Scanner, or Manual Input)</label>
-                <div class="flex flex-wrap gap-2">
-                  <input type="text" id="rfidUidDisplay" placeholder="Waiting for card... (or type UID e.g. 2A718630 or E2806894)" onkeydown="if(event.key==='Enter'){handleManualRFIDScan();}" class="flex-1 min-w-[200px] p-2.5 border rounded-xl text-xs font-mono font-bold bg-white outline-none focus:ring-2 focus:ring-amber-500 uppercase shadow-sm" />
-                  <button type="button" onclick="handleManualRFIDScan()" class="bg-teal-700 hover:bg-teal-800 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center shadow-sm whitespace-nowrap">
-                    <i class="fa-solid fa-id-card-clip mr-1.5"></i> Read Card
-                  </button>
-                </div>
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">RFID Card Address (Auto-read on Card Tap)</label>
+                <input type="text" id="rfidUidDisplay" placeholder="Waiting for RFID card tap on reader..." onkeydown="if(event.key==='Enter'){handleManualRFIDScan();}" class="w-full p-2.5 border rounded-xl text-xs font-mono font-bold bg-white outline-none focus:ring-2 focus:ring-amber-500 uppercase shadow-sm" />
               </div>
 
               <div id="rfidMessage" class="p-3 rounded-xl text-xs bg-white border border-amber-100 text-slate-600">
@@ -1722,14 +1708,73 @@
 
 <!-- JAVASCRIPT APPLICATION LOGIC - RFID + TOKEN + EMERGENCY PRIORITY -->
   <script>
-    // DOMPurify Sanitizer Fallback if CDN is unreachable or running offline
-    if (typeof DOMPurify === 'undefined') {
+    // Configure DOMPurify to preserve internal table structures and action buttons
+    if (typeof DOMPurify !== 'undefined') {
+      try {
+        DOMPurify.addHook('uponSanitizeAttribute', function(node, data) {
+          if (data.attrName && (data.attrName.startsWith('on') || data.attrName === 'data-patient-id' || data.attrName === 'data-id')) {
+            data.forceKeepAttr = true;
+          }
+        });
+        DOMPurify.setConfig({
+          ADD_TAGS: ['table', 'tbody', 'thead', 'tr', 'td', 'th', 'button', 'input', 'select', 'optgroup', 'option', 'i', 'span', 'p', 'div', 'strong', 'label', 'details', 'summary'],
+          ADD_ATTR: ['onclick', 'onchange', 'onkeyup', 'onkeydown', 'title', 'target', 'style', 'class', 'value', 'type', 'colspan', 'rowspan', 'selected', 'disabled', 'placeholder', 'id', 'name', 'src', 'alt', 'href']
+        });
+      } catch (e) {}
+    } else {
       window.DOMPurify = {
         sanitize: function(dirty) {
-          if (typeof escapeHtml === 'function') return escapeHtml(dirty);
-          return String(dirty ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          return dirty;
         }
       };
+    }
+
+    // Helper to safely render table rows without browser HTML parser stripping <td> and <tr>
+    function setTableRowHTML(trElement, tdsHtml) {
+      if (!trElement) return;
+      const wrapped = `<table><tbody><tr>${tdsHtml}</tr></tbody></table>`;
+      let clean = wrapped;
+      if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+        clean = DOMPurify.sanitize(wrapped, {
+          ADD_TAGS: ['table', 'tbody', 'thead', 'tr', 'td', 'th', 'button', 'input', 'select', 'optgroup', 'option', 'i', 'span', 'p', 'div', 'strong'],
+          ADD_ATTR: ['onclick', 'onchange', 'onkeyup', 'onkeydown', 'title', 'target', 'style', 'class', 'value', 'type', 'colspan', 'selected', 'disabled', 'placeholder', 'id']
+        });
+      }
+      const temp = document.createElement('div');
+      temp.innerHTML = clean;
+      const tempTr = temp.querySelector('tr');
+      trElement.innerHTML = '';
+      if (tempTr) {
+        while (tempTr.firstChild) {
+          trElement.appendChild(tempTr.firstChild);
+        }
+      } else {
+        trElement.innerHTML = tdsHtml;
+      }
+    }
+
+    // Helper to safely render table bodies without browser HTML parser stripping rows
+    function setTableBodyHTML(tbodyElement, rowsHtml) {
+      if (!tbodyElement) return;
+      const wrapped = `<table><tbody>${rowsHtml}</tbody></table>`;
+      let clean = wrapped;
+      if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+        clean = DOMPurify.sanitize(wrapped, {
+          ADD_TAGS: ['table', 'tbody', 'thead', 'tr', 'td', 'th', 'button', 'input', 'select', 'optgroup', 'option', 'i', 'span', 'p', 'div', 'strong'],
+          ADD_ATTR: ['onclick', 'onchange', 'onkeyup', 'onkeydown', 'title', 'target', 'style', 'class', 'value', 'type', 'colspan', 'selected', 'disabled', 'placeholder', 'id']
+        });
+      }
+      const temp = document.createElement('div');
+      temp.innerHTML = clean;
+      const tempTbody = temp.querySelector('tbody');
+      tbodyElement.innerHTML = '';
+      if (tempTbody) {
+        while (tempTbody.firstChild) {
+          tbodyElement.appendChild(tempTbody.firstChild);
+        }
+      } else {
+        tbodyElement.innerHTML = rowsHtml;
+      }
     }
 
     
@@ -2147,7 +2192,7 @@
     function addRxMedicineRow() {
       const tbody = document.getElementById('consultRxTableBody');
       const tr = document.createElement('tr');
-      tr.innerHTML = DOMPurify.sanitize(`
+      setTableRowHTML(tr, `
         <td class="p-2"><input type="text" class="w-full p-1.5 border rounded-lg rx-med-name" placeholder="Drug name" required /></td>
         <td class="p-2"><input type="text" class="w-full p-1.5 border rounded-lg rx-med-dose" value="500 mg" placeholder="Dose" /></td>
         <td class="p-2"><select class="w-full p-1.5 border rounded-lg rx-med-freq"><option value="1 - 0 - 1">1-0-1 (BID)</option><option value="1 - 1 - 1">1-1-1 (TID)</option><option value="1 - 0 - 0">1-0-0 (OD)</option><option value="0 - 0 - 1">0-0-1 (OD)</option><option value="SOS">SOS</option></select></td>
@@ -2585,34 +2630,62 @@
 
     function extractRFIDUid(rawLine) {
       if (!rawLine) return null;
-      const s = String(rawLine).trim();
+      let s = String(rawLine).trim();
       if (!s || s === "RFID_READY") return null;
+
+      // Clean away known setup/prompt phrases so any card UID inside is never masked
+      s = s.replace(/place\s+your\s+rfid\s+card\s+near\s+the\s+reader\.*/gi, ' ')
+           .replace(/waiting\s+for\s+rfid\.*/gi, ' ')
+           .replace(/scanning\s+for\s+rfid\.*/gi, ' ')
+           .replace(/mfrc522\s+initial\w*/gi, ' ')
+           .replace(/firmware\s+ver\w*[:\s]*0x[0-9a-f]+/gi, ' ')
+           .trim();
+
+      if (!s) return null;
 
       const sClean = s.replace(/0x/gi, '');
 
-      // 1. Look for separated hex bytes (e.g. "2A 71 86 30", "2A:71:86:30", "2A-71-86-30") - 4 to 10 bytes
-      const pairMatch = sClean.match(/\b([0-9A-Fa-f]{2}[\s:\-_]){3,9}[0-9A-Fa-f]{2}\b/);
+      // 1. Separated hex bytes (with spaces, colons, hyphens, or commas) - 4 to 10 bytes
+      // e.g. "2A 71 86 30", "2A:71:86:30", "2A-71-86-30", "2A, 71, 86, 30", "2A,71,86,30"
+      const pairMatch = sClean.match(/\b([0-9A-Fa-f]{2}[\s:\-_,]\s*){3,9}[0-9A-Fa-f]{2}\b/);
       if (pairMatch) {
-        const cleaned = pairMatch[0].replace(/[\s:\-_]/g, '').toUpperCase();
+        const cleaned = pairMatch[0].replace(/[\s:\-_,]/g, '').toUpperCase();
         if (cleaned.length >= 8 && cleaned.length <= 20) {
           return cleaned;
         }
       }
 
-      // 2. Look for contiguous hex strings of standard UID lengths (8, 14, 16, 20 hex chars)
+      // 2. Contiguous hex strings of standard UID lengths (8, 14, 16, 20 hex chars)
       const hexMatch = sClean.match(/\b([0-9A-Fa-f]{8}|[0-9A-Fa-f]{14}|[0-9A-Fa-f]{16}|[0-9A-Fa-f]{20})\b/);
       if (hexMatch) {
         return hexMatch[0].toUpperCase();
       }
 
       // 3. Fallback: Check if line starts with common prefixes like "Card UID:", "UID:", "Tag:", "Hex:"
-      let stripped = s.replace(/^(card\s*uid|uid|nuid|card\s*id|tag\s*id|tag|card|rfid|nfc|hex|dec|in\s*hex|picc\s*uid)\s*[:=-]?\s*/i, '').trim();
-      stripped = stripped.replace(/0x/gi, '').replace(/[\s:\-_]/g, '').toUpperCase();
-      if (/^[0-9A-F]{6,32}$/.test(stripped)) {
-        return stripped;
+      const stripped = s.replace(/^(.*?)(card\s*uid|uid\s*tag|tag\s*uid|uid|nuid|card\s*id|tag\s*id|tag|card|rfid|nfc|hex|dec|in\s*hex|picc\s*uid)\s*[:=-]?\s*/i, '').trim();
+      if (stripped && stripped !== s) {
+        const strippedClean = stripped.replace(/0x/gi, '');
+        const subPair = strippedClean.match(/([0-9A-Fa-f]{2}[\s:\-_,]\s*){3,9}[0-9A-Fa-f]{2}/);
+        if (subPair) {
+          const c = subPair[0].replace(/[\s:\-_,]/g, '').toUpperCase();
+          if (c.length >= 8 && c.length <= 20) return c;
+        }
+        const subHex = strippedClean.match(/([0-9A-Fa-f]{8}|[0-9A-Fa-f]{14}|[0-9A-Fa-f]{16}|[0-9A-Fa-f]{20})/);
+        if (subHex) return subHex[0].toUpperCase();
       }
 
-      // 4. Look for decimal card number (8 to 14 digits)
+      // 4. Space or comma-separated decimal bytes (e.g. "42 113 134 48" or "42, 113, 134, 48")
+      const decBytesMatch = s.match(/\b(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g);
+      if (decBytesMatch && [4, 7, 10].includes(decBytesMatch.length)) {
+        if (/dec|uid|card|tag|in dec/i.test(s) || decBytesMatch.length === 4) {
+          try {
+            const hexStr = decBytesMatch.map(b => parseInt(b, 10).toString(16).padStart(2, '0')).join('').toUpperCase();
+            if (hexStr.length >= 8 && hexStr.length <= 20) return hexStr;
+          } catch (e) {}
+        }
+      }
+
+      // 5. Look for continuous decimal card number (8 to 14 digits)
       const decMatch = s.match(/\b(\d{8,14})\b/);
       if (decMatch) {
         return decMatch[0];
@@ -3635,7 +3708,7 @@
       if (badge) badge.textContent = userBookings.length;
 
       if (userBookings.length === 0) {
-        tbody.innerHTML = DOMPurify.sanitize(`<tr><td colspan="5" class="p-6 text-center text-slate-400">You have 0 active token bookings. Go to '2. Book Specialist Doctor' to get a token.</td></tr>`);
+        setTableBodyHTML(tbody, `<tr><td colspan="5" class="p-6 text-center text-slate-400">You have 0 active token bookings. Go to '2. Book Specialist Doctor' to get a token.</td></tr>`);
         return;
       }
 
@@ -3652,7 +3725,7 @@
 
         const tr = document.createElement('tr');
         tr.className = emergency ? "bg-rose-50/80 border-l-4 border-rose-600" : (idx % 2 === 0 ? "bg-white" : "bg-slate-50/40");
-        tr.innerHTML = DOMPurify.sanitize(`
+        setTableRowHTML(tr, `
           <td class="p-3">
             ${tokenBadge}
           </td>
@@ -4895,6 +4968,22 @@
 
     let rfidBufferTimeout = null;
 
+    function closeActiveRFIDModals() {
+      hideModalFlex('rfidActionModal');
+      hideModalFlex('rfidEmergencyModal');
+      hideModalFlex('rfidOPBookingModal');
+      const regBox = document.getElementById('rfidRegistrationBox');
+      if (regBox) {
+        regBox.classList.add('hidden');
+        regBox.style.display = 'none';
+      }
+      const scanCard = document.getElementById('scannedPatientCard');
+      if (scanCard) {
+        scanCard.classList.add('hidden');
+        scanCard.style.display = 'none';
+      }
+    }
+
     async function connectRFIDReader() {
       const status = document.getElementById("rfidStatus");
       const connectBtn = document.getElementById("rfidConnectBtn");
@@ -4912,6 +5001,7 @@
         }
 
         // Cleanly release any existing port/reader
+        rfidKeepReading = false;
         if (rfidReader) {
           try { await rfidReader.cancel(); rfidReader.releaseLock(); } catch (e) {}
           rfidReader = null;
@@ -4922,17 +5012,7 @@
         }
         
         rfidPort = await navigator.serial.requestPort();
-        
-        const baudEl = document.getElementById("rfidBaudRate");
-        const selectedBaud = baudEl ? parseInt(baudEl.value, 10) : 9600;
-        await rfidPort.open({ baudRate: selectedBaud || 9600 });
-
-        // Assert DTR and RTS signals so Arduino / CH340 / ESP32 flushes serial output
-        try {
-          await rfidPort.setSignals({ dataTerminalReady: true, requestToSend: true });
-        } catch (sigErr) {
-          console.warn("Could not set DTR/RTS signals:", sigErr);
-        }
+        await rfidPort.open({ baudRate: 9600 });
         
         rfidKeepReading = true;
         rfidReadBuffer = "";
@@ -4946,12 +5026,13 @@
           connectBtn.classList.add("opacity-50", "cursor-not-allowed");
         }
         
-        setRFIDMessage(`✓ RFID Receiver Connected on USB at ${selectedBaud || 9600} baud. Continuously reading card taps...`, "success");
-        setRFIDDiagnostics(`Continuous serial reader active at ${selectedBaud || 9600} baud with DTR/RTS asserted. Listening continuously for card taps...`, "success");
+        setRFIDMessage("✓ RFID Receiver Connected on USB. Continuously reading card taps...", "success");
+        setRFIDDiagnostics("Continuous serial reader active. Listening continuously for card taps on RC522...", "success");
         
         readRFIDSerial();
       } catch (error) {
         rfidPort = null;
+        rfidKeepReading = false;
         if (status) {
           status.textContent = "Disconnected";
           status.className = "text-[10px] font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg";
@@ -4975,33 +5056,46 @@
           while (rfidKeepReading) {
             const { value, done } = await rfidReader.read();
             if (done) break;
-            if (value) {
-              const chunk = textDecoder.decode(value, { stream: true });
-              rfidReadBuffer += chunk;
-              
-              // Live status display showing hardware communication
-              const previewStr = rfidReadBuffer.replace(/[\r\n\t]+/g, ' ').trim().slice(-60);
-              if (previewStr) {
-                setRFIDDiagnostics(`Receiving Hardware Data: "${previewStr}" (${rfidReadBuffer.length} bytes)`, "info");
+            if (value && value.length > 0) {
+              // 1. Direct raw binary byte check (in case Arduino sketch uses Serial.write)
+              if (value.length >= 4 && value.length <= 10) {
+                const rawHex = Array.from(value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
+                const asciiText = textDecoder.decode(value);
+                if ([8, 14, 20].includes(rawHex.length) && (!/^[\x20-\x7E\r\n]+$/.test(asciiText) || extractRFIDUid(asciiText))) {
+                  const targetUid = extractRFIDUid(asciiText) || rawHex;
+                  rfidReadBuffer = "";
+                  processRFIDCard(targetUid);
+                  continue;
+                }
               }
 
-              // 1. Direct immediate check on chunk
+              // 2. Decode ASCII text stream
+              const chunk = textDecoder.decode(value, { stream: true });
+              rfidReadBuffer += chunk;
+
+              // Live diagnostics showing hardware communication
+              const previewStr = rfidReadBuffer.replace(/[\r\n\t]+/g, ' ').trim().slice(-60);
+              if (previewStr) {
+                setRFIDDiagnostics(`Hardware Data: "${previewStr}" (${rfidReadBuffer.length} bytes)`, "info");
+              }
+
+              // A. Immediate check on incoming chunk
               const chunkUid = extractRFIDUid(chunk);
               if (chunkUid) {
                 rfidReadBuffer = "";
-                await processRFIDCard(chunkUid);
+                processRFIDCard(chunkUid);
                 continue;
               }
 
-              // 2. Direct immediate check on accumulated buffer
+              // B. Immediate check on accumulated buffer
               const bufferUid = extractRFIDUid(rfidReadBuffer);
               if (bufferUid) {
                 rfidReadBuffer = "";
-                await processRFIDCard(bufferUid);
+                processRFIDCard(bufferUid);
                 continue;
               }
 
-              // 3. Check if full lines have arrived
+              // C. Check line-by-line if newlines present
               if (rfidReadBuffer.includes('\n') || rfidReadBuffer.includes('\r')) {
                 const lines = rfidReadBuffer.split(/\r?\n/);
                 rfidReadBuffer = lines.pop() || "";
@@ -5009,30 +5103,35 @@
                   const uid = extractRFIDUid(line);
                   if (uid) {
                     rfidReadBuffer = "";
-                    await processRFIDCard(uid);
+                    processRFIDCard(uid);
                     break;
                   }
                 }
               }
 
-              // 4. Fallback flush timer for fragmented byte streams (150ms)
+              // D. Fallback flush timer for fragmented byte streams (80ms)
               clearTimeout(rfidBufferTimeout);
-              rfidBufferTimeout = setTimeout(async () => {
+              rfidBufferTimeout = setTimeout(() => {
                 if (rfidReadBuffer.trim()) {
                   const flushedUid = extractRFIDUid(rfidReadBuffer);
                   if (flushedUid) {
                     rfidReadBuffer = "";
-                    await processRFIDCard(flushedUid);
+                    processRFIDCard(flushedUid);
                   }
                 }
-              }, 150);
+              }, 80);
+
+              // Cap buffer length to avoid memory bloat
+              if (rfidReadBuffer.length > 300) {
+                rfidReadBuffer = rfidReadBuffer.slice(-100);
+              }
             }
           }
         } catch (error) {
           if (rfidKeepReading) {
             console.warn("Serial reading stream error, auto-recovering reader:", error);
             setRFIDDiagnostics(`Serial stream notice: ${error.message || error} (reconnecting...)`, "warning");
-            await new Promise(r => setTimeout(r, 400));
+            await new Promise(r => setTimeout(r, 200));
           }
         } finally {
           if (rfidReader) {
@@ -5046,13 +5145,13 @@
     async function autoConnectAuthorizedPort(port) {
       if (!port || rfidPort) return;
       try {
+        rfidKeepReading = false;
+        if (rfidReader) {
+          try { await rfidReader.cancel(); rfidReader.releaseLock(); } catch (e) {}
+          rfidReader = null;
+        }
         rfidPort = port;
-        const baudEl = document.getElementById("rfidBaudRate");
-        const selectedBaud = baudEl ? parseInt(baudEl.value, 10) : 9600;
-        await rfidPort.open({ baudRate: selectedBaud || 9600 });
-        try {
-          await rfidPort.setSignals({ dataTerminalReady: true, requestToSend: true });
-        } catch (sigErr) {}
+        await rfidPort.open({ baudRate: 9600 });
         
         rfidKeepReading = true;
         rfidReadBuffer = "";
@@ -5067,13 +5166,50 @@
           connectBtn.disabled = true;
           connectBtn.classList.add("opacity-50", "cursor-not-allowed");
         }
-        setRFIDMessage(`✓ RFID Receiver Connected at ${selectedBaud || 9600} baud. Continuously reading card taps...`, "success");
-        setRFIDDiagnostics(`Continuous serial reader active on ${selectedBaud || 9600} baud. Tap any card on RC522.`, "success");
+        setRFIDMessage("✓ RFID Receiver Connected on USB. Continuously reading card taps...", "success");
+        setRFIDDiagnostics("Continuous serial reader active at 9600 baud. Tap any card on RC522.", "success");
         readRFIDSerial();
       } catch (e) {
         rfidPort = null;
       }
     }
+
+    // Global listener for USB Desktop RFID Scanners (Keyboard-Wedge emulation)
+    let globalRfidKeyBuffer = "";
+    let globalRfidKeyTimer = null;
+    window.addEventListener("keydown", (e) => {
+      const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
+      const activeId = document.activeElement ? document.activeElement.id : "";
+      const isInput = (activeTag === "input" || activeTag === "textarea" || activeTag === "select") && activeId !== "rfidUidDisplay";
+
+      if (e.key === "Enter") {
+        if (globalRfidKeyBuffer.trim().length >= 4) {
+          const scanned = extractRFIDUid(globalRfidKeyBuffer) || normalizeRFID(globalRfidKeyBuffer);
+          if (scanned && (!isInput || activeId === "rfidUidDisplay")) {
+            e.preventDefault();
+            globalRfidKeyBuffer = "";
+            processRFIDCard(scanned);
+            return;
+          }
+        }
+        globalRfidKeyBuffer = "";
+        return;
+      }
+
+      if (e.key && e.key.length === 1 && /[0-9a-zA-Z:\-_, ]/.test(e.key)) {
+        globalRfidKeyBuffer += e.key;
+        clearTimeout(globalRfidKeyTimer);
+        globalRfidKeyTimer = setTimeout(() => {
+          if (globalRfidKeyBuffer.trim().length >= 8) {
+            const scanned = extractRFIDUid(globalRfidKeyBuffer) || normalizeRFID(globalRfidKeyBuffer);
+            if (scanned && (!isInput || activeId === "rfidUidDisplay")) {
+              processRFIDCard(scanned);
+            }
+          }
+          globalRfidKeyBuffer = "";
+        }, 150);
+      }
+    }, true);
 
     if (typeof navigator !== "undefined" && "serial" in navigator) {
       navigator.serial.addEventListener("connect", (event) => {
@@ -5104,30 +5240,48 @@
         setRFIDMessage("Invalid RFID UID address format. Please enter valid hex characters (e.g. 2A718630 or E2806894).", "error");
         return;
       }
-      await processRFIDCard(uid);
+      processRFIDCard(uid);
     }
 
-    async function processRFIDCard(uid) {
-      if (!uid) return;
-      uid = normalizeRFID(uid);
+    async function processRFIDCard(rawUid) {
+      if (!rawUid) return;
+      const uid = normalizeRFID(rawUid);
       if (!uid) return;
 
       const now = Date.now();
-      if (uid === lastScannedUID && (now - lastRFIDScanTime) < 1500) {
-        return; // Debounce duplicate card reads within 1.5s
+      const isCardChanging = (uid !== lastScannedUID);
+
+      // Debounce only if the exact same card UID is tapped repeatedly within 1.2s
+      if (!isCardChanging && (now - lastRFIDScanTime) < 1200) {
+        return;
       }
+
+      const previousUid = lastScannedUID;
       lastScannedUID = uid;
       lastRFIDScanTime = now;
 
+      // 1. INSTANTLY update the UID display input with the new address!
       const displayInput = document.getElementById("rfidUidDisplay");
       if (displayInput) {
         displayInput.value = uid;
-        displayInput.classList.add("ring-4", "ring-emerald-400");
-        setTimeout(() => displayInput.classList.remove("ring-4", "ring-emerald-400"), 800);
+        displayInput.classList.remove("ring-4", "ring-emerald-400", "ring-amber-400", "ring-blue-500");
+        void displayInput.offsetWidth; // trigger reflow
+        displayInput.classList.add("ring-4", isCardChanging && previousUid ? "ring-blue-500" : "ring-emerald-400");
+        setTimeout(() => displayInput.classList.remove("ring-4", "ring-emerald-400", "ring-blue-500"), 1200);
       }
 
-      setRFIDMessage(`Card Address read: ${uid}. Checking hospital patient registry...`, "info");
-      setRFIDDiagnostics(`Processed Card Address: ${uid} at ${new Date().toLocaleTimeString()}. Querying database...`, "info");
+      // Close previous modals on card change
+      if (isCardChanging) {
+        closeActiveRFIDModals();
+      }
+
+      if (isCardChanging && previousUid) {
+        setRFIDMessage(`🔄 RFID Card Changed: ${previousUid} ➜ ${uid}. Reading details...`, "info");
+        setRFIDDiagnostics(`Card Address Changed: ${previousUid} ➜ ${uid} at ${new Date().toLocaleTimeString()}.`, "info");
+      } else {
+        setRFIDMessage(`Card Address Read: ${uid}. Checking hospital patient registry...`, "info");
+        setRFIDDiagnostics(`Read Card Address: ${uid} at ${new Date().toLocaleTimeString()}. Querying database...`, "info");
+      }
 
       emitTelemetryEvent({
         action: 'RFID_SCANNED',
@@ -5149,68 +5303,71 @@
       try {
         let patient = null;
 
-        // 1. Check rfidCards collection in Firebase
-        let mappedCard = null;
-        try {
-          const cardSnap = await db.ref('rfidCards/' + sanitizeFirebaseKey(uid)).once('value');
-          if (cardSnap.exists()) {
-            mappedCard = cardSnap.val();
-          }
-        } catch (e) {}
+        // 1. Instant local memory check (Zero latency)
+        if (Array.isArray(registeredUsers) && registeredUsers.length > 0) {
+          patient = registeredUsers.find(u => u && u.rfidUid && normalizeRFID(u.rfidUid) === uid);
+        }
 
         // 2. Check localStorage cache
-        if (!mappedCard) {
+        if (!patient) {
           try {
             const localCards = JSON.parse(localStorage.getItem('ayushcare_rfid_cards') || '{}');
-            if (localCards[uid]) mappedCard = localCards[uid];
+            if (localCards[uid]) {
+              const mappedCard = localCards[uid];
+              patient = (registeredUsers || []).find(p => p && (String(p.patientId || '').trim() === String(mappedCard.patientId).trim() || String(p.id || '').trim() === String(mappedCard.patientId).trim()));
+              if (!patient) {
+                patient = {
+                  name: mappedCard.name || 'Registered Patient',
+                  patientId: mappedCard.patientId,
+                  rfidUid: uid,
+                  gender: mappedCard.gender || 'Male',
+                  age: mappedCard.age || '32',
+                  blood: mappedCard.blood || 'O+',
+                  phone: mappedCard.phone || '',
+                  email: mappedCard.email || '',
+                  hospital: mappedCard.hospital || currentHospitalName
+                };
+              }
+            }
           } catch (e) {}
         }
 
-        // Fetch all patients from Firebase & local memory
-        let allPatients = [];
-        try {
-          const snap = await db.ref('patients').once('value');
-          if (snap.exists()) {
-            allPatients = Object.values(snap.val() || {});
-          }
-        } catch (e) {}
-
-        if (Array.isArray(registeredUsers) && registeredUsers.length > 0) {
-          registeredUsers.forEach(ru => {
-            if (ru && !allPatients.some(p => p && (p.patientId === ru.patientId || p.id === ru.id))) {
-              allPatients.push(ru);
-            }
-          });
-        }
-
-        // Match patient from mappedCard
-        if (mappedCard && mappedCard.patientId) {
-          patient = allPatients.find(p =>
-            p && (String(p.patientId || '').trim() === String(mappedCard.patientId).trim() ||
-                  String(p.id || '').trim() === String(mappedCard.patientId).trim())
-          );
-          if (!patient) {
-            patient = {
-              name: mappedCard.name || 'Registered Patient',
-              patientId: mappedCard.patientId,
-              rfidUid: uid,
-              hospital: mappedCard.hospital || currentHospitalName
-            };
-          }
-        }
-
-        // 3. Match patient by direct rfidUid property
-        if (!patient) {
-          patient = allPatients.find(p =>
-            p && p.rfidUid && normalizeRFID(p.rfidUid) === uid
-          );
-        }
-
-        // 4. Check waitingPatients list
+        // 3. Check waitingPatients list
         if (!patient && Array.isArray(waitingPatients)) {
           patient = waitingPatients.find(p =>
             p && p.rfidUid && normalizeRFID(p.rfidUid) === uid
           );
+        }
+
+        // 4. Firebase check with 1.5s timeout race so offline/slow network never freezes UI
+        if (!patient) {
+          try {
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500));
+            const cardPromise = db.ref('rfidCards/' + sanitizeFirebaseKey(uid)).once('value');
+            const cardSnap = await Promise.race([cardPromise, timeoutPromise]);
+            if (cardSnap && cardSnap.exists()) {
+              const mappedCard = cardSnap.val();
+              if (mappedCard && mappedCard.patientId) {
+                patient = (registeredUsers || []).find(p =>
+                  p && (String(p.patientId || '').trim() === String(mappedCard.patientId).trim() ||
+                        String(p.id || '').trim() === String(mappedCard.patientId).trim())
+                );
+                if (!patient) {
+                  patient = {
+                    name: mappedCard.name || 'Registered Patient',
+                    patientId: mappedCard.patientId,
+                    rfidUid: uid,
+                    hospital: mappedCard.hospital || currentHospitalName
+                  };
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // If user changed card while database was querying, discard stale result
+        if (uid !== lastScannedUID) {
+          return;
         }
 
         // =======================================================
@@ -5266,49 +5423,42 @@
     }
 
     async function showWaitingPatientMapper(uid) {
+      if (uid !== lastScannedUID) return; // ignore stale card
       const box = document.getElementById('rfidRegistrationBox');
       if (!box) return;
 
-      // 1. Collect all waiting patients
-      let currentWaiting = Array.isArray(waitingPatients) ? [...waitingPatients] : [];
-      try {
-        const snap = await db.ref('waitingPatients').once('value');
-        if (snap.exists()) {
-          const val = snap.val() || {};
-          Object.values(val).forEach(wp => {
-            if (wp && wp.patientId && !currentWaiting.some(c => c.patientId === wp.patientId)) {
-              currentWaiting.push(wp);
-            }
+      // Helper to build options HTML
+      function buildOptions(waitingList, unassignedList) {
+        let html = '';
+        if (waitingList.length > 0) {
+          html += '<optgroup label="🕒 Waiting Patients (Physically in Hospital)">';
+          waitingList.forEach((p, idx) => {
+            html += `<option value="${escapeHtml(p.patientId)}" ${idx === 0 ? 'selected' : ''}>🕒 ${escapeHtml(p.name || 'Patient')} [${escapeHtml(p.patientId)}] ${p.phone ? '— ' + escapeHtml(p.phone) : ''} (${escapeHtml(p.visitReason || 'OPD')})</option>`;
           });
+          html += '</optgroup>';
         }
-      } catch (e) {}
+        if (unassignedList.length > 0) {
+          html += '<optgroup label="📋 Registered Hospital Patients (No RFID yet)">';
+          unassignedList.slice(0, 40).forEach(p => {
+            html += `<option value="${escapeHtml(p.patientId)}">📋 ${escapeHtml(p.name || 'Patient')} [${escapeHtml(p.patientId)}] ${p.phone ? '— ' + escapeHtml(p.phone) : ''}</option>`;
+          });
+          html += '</optgroup>';
+        }
+        if (!html) {
+          html = '<option value="">No patients found — register a new walk-in patient below</option>';
+        }
+        return html;
+      }
 
-      // 2. Also collect registered patients who don't have an RFID card yet
-      const unassigned = (registeredUsers || []).filter(u =>
+      // 1. Collect from local memory immediately (Zero latency!)
+      let currentWaiting = Array.isArray(waitingPatients) ? [...waitingPatients] : [];
+      let unassigned = (registeredUsers || []).filter(u =>
         u && u.patientId && !u.rfidUid && !currentWaiting.some(w => w.patientId === u.patientId)
       );
 
-      let optionsHtml = '';
-      if (currentWaiting.length > 0) {
-        optionsHtml += '<optgroup label="🕒 Waiting Patients (Physically in Hospital)">';
-        currentWaiting.forEach((p, idx) => {
-          optionsHtml += `<option value="${escapeHtml(p.patientId)}" ${idx === 0 ? 'selected' : ''}>🕒 ${escapeHtml(p.name || 'Patient')} [${escapeHtml(p.patientId)}] ${p.phone ? '— ' + escapeHtml(p.phone) : ''} (${escapeHtml(p.visitReason || 'OPD')})</option>`;
-        });
-        optionsHtml += '</optgroup>';
-      }
+      let optionsHtml = buildOptions(currentWaiting, unassigned);
 
-      if (unassigned.length > 0) {
-        optionsHtml += '<optgroup label="📋 Registered Hospital Patients (No RFID yet)">';
-        unassigned.slice(0, 40).forEach(p => {
-          optionsHtml += `<option value="${escapeHtml(p.patientId)}">📋 ${escapeHtml(p.name || 'Patient')} [${escapeHtml(p.patientId)}] ${p.phone ? '— ' + escapeHtml(p.phone) : ''}</option>`;
-        });
-        optionsHtml += '</optgroup>';
-      }
-
-      if (!optionsHtml) {
-        optionsHtml = '<option value="">No patients found — register a new walk-in patient below</option>';
-      }
-
+      // Instantly display the mapping box without waiting for any network calls!
       box.classList.remove('hidden');
       box.style.display = 'block';
 
@@ -5388,6 +5538,30 @@
       `);
 
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      // Non-blocking background sync from Firebase to refresh options if new patients arrived in cloud
+      setTimeout(async () => {
+        try {
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500));
+          const snapPromise = db.ref('waitingPatients').once('value');
+          const snap = await Promise.race([snapPromise, timeoutPromise]);
+          if (snap && snap.exists() && uid === lastScannedUID) {
+            const val = snap.val() || {};
+            let updatedWaiting = [...currentWaiting];
+            Object.values(val).forEach(wp => {
+              if (wp && wp.patientId && !updatedWaiting.some(c => c.patientId === wp.patientId)) {
+                updatedWaiting.push(wp);
+              }
+            });
+            const sel = document.getElementById('waitingPatientSelect');
+            if (sel) {
+              const currentVal = sel.value;
+              sel.innerHTML = buildOptions(updatedWaiting, unassigned);
+              if (currentVal) sel.value = currentVal;
+            }
+          }
+        } catch (e) {}
+      }, 50);
     }
 
     async function confirmWaitingPatientRFIDMapping(uid) {
@@ -5655,7 +5829,7 @@
       const rxTableBody = document.getElementById('printRxTableBody');
       if (rxTableBody) {
         if (Array.isArray(p.medicines) && p.medicines.length > 0) {
-          rxTableBody.innerHTML = DOMPurify.sanitize(p.medicines.map((m, idx) => `
+          setTableBodyHTML(rxTableBody, p.medicines.map((m, idx) => `
             <tr>
               <td class="p-2">${idx + 1}</td>
               <td class="p-2 font-bold text-slate-900">${escapeHtml(m.name)}</td>
@@ -5666,7 +5840,7 @@
             </tr>
           `).join(''));
         } else {
-          rxTableBody.innerHTML = DOMPurify.sanitize(`
+          setTableBodyHTML(rxTableBody, `
             <tr>
               <td class="p-2">1</td>
               <td class="p-2 font-bold text-slate-900">Yograj Guggulu / Amlodipine</td>
@@ -5900,7 +6074,7 @@
       if (badge) badge.textContent = hospitalList.length;
 
       if (!list.length) {
-        tbody.innerHTML = DOMPurify.sanitize(`<tr><td colspan="7" class="p-6 text-center text-slate-400">No active tokens in queue for ${escapeHtml(currentHospitalName)}.</td></tr>`);
+        setTableBodyHTML(tbody, `<tr><td colspan="7" class="p-6 text-center text-slate-400">No active tokens in queue for ${escapeHtml(currentHospitalName)}.</td></tr>`);
         return;
       }
 
@@ -5924,7 +6098,7 @@
 
         const tr = document.createElement('tr');
         tr.className = emergency ? "bg-rose-50/80 border-l-4 border-rose-600" : (index % 2 === 0 ? "bg-white" : "bg-slate-50/40");
-        tr.innerHTML = DOMPurify.sanitize(`
+        setTableRowHTML(tr, `
           <td class="p-3">${tokenHtml}<div class="mt-0.5">${queueLabel}</div></td>
           <td class="p-3"><span class="font-bold text-slate-900 block">${escapeHtml(b.date || '-')}</span><span class="text-[10px] text-slate-400 font-mono">${escapeHtml(b.slot || '-')}</span></td>
           <td class="p-3">
@@ -5936,18 +6110,18 @@
           <td class="p-3 text-center"><span class="px-2.5 py-1 rounded-full text-[10px] font-extrabold ${statusClass}">${emergency ? 'Emergency Priority' : escapeHtml(status)}</span></td>
           <td class="p-3"><span class="text-[10px] font-bold ${b.source === 'RFID' ? 'text-amber-700' : 'text-slate-500'}">${b.source === 'RFID' ? 'RFID' : escapeHtml(b.source || 'OPD')}</span></td>
           <td class="p-3 text-center space-x-1">
-            <button onclick="announceToken('${safe(b.tokenNumber || 'EMG-1')}', '${safe(b.patientName || 'Patient')}', '${safe(b.room || 'Room 101')}', '${safe(b.doctorName || 'Doctor')}')" title="Announce Token over Audio Speaker" class="bg-teal-700 hover:bg-teal-800 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
+            <button type="button" onclick="announceToken('${safe(b.tokenNumber || 'EMG-1')}', '${safe(b.patientName || 'Patient')}', '${safe(b.room || 'Room 101')}', '${safe(b.doctorName || 'Doctor')}')" title="Announce Token over Audio Speaker" class="bg-teal-700 hover:bg-teal-800 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
               <i class="fa-solid fa-bullhorn mr-0.5"></i> Call
             </button>
-            <button onclick="openDoctorConsultation('${safe(b.id)}')" title="Start Clinical Consultation & Prescribe Rx" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
+            <button type="button" onclick="openDoctorConsultation('${safe(b.id)}')" title="Start Clinical Consultation & Prescribe Rx" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
               <i class="fa-solid fa-stethoscope mr-0.5"></i> Consult
             </button>
-            <button onclick="selectPatientForOpdUpload('${safe(b.patientId || '')}', '${safe(b.patientName || 'Patient')}', '${safe(b.doctorName || 'Doctor')}')" title="Upload Diagnostic Report for this Patient" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
+            <button type="button" onclick="selectPatientForOpdUpload('${safe(b.patientId || '')}', '${safe(b.patientName || 'Patient')}', '${safe(b.doctorName || 'Doctor')}')" title="Upload Diagnostic Report for this Patient" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
               <i class="fa-solid fa-cloud-arrow-up mr-0.5"></i> Upload
             </button>
-            <button onclick="setQueueStatus('${safe(b.id)}', 'Active')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold">Active</button>
-            <button onclick="setQueueStatus('${safe(b.id)}', 'On Hold')" class="bg-amber-50 hover:bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] font-bold">Hold</button>
-            <button onclick="confirmMarkOver('${safe(b.id)}', '${safe(b.patientName)}', '${safe(b.patientId || 'N/A')}', '${safe(b.tokenNumber || 'EMG-1')}', '${safe(b.doctorName || 'Emergency Team')}', '${safe(b.date || '')}')" class="bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1 rounded text-[10px] font-bold shadow">Over</button>
+            <button type="button" onclick="setQueueStatus('${safe(b.id)}', 'Active')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold">Active</button>
+            <button type="button" onclick="setQueueStatus('${safe(b.id)}', 'On Hold')" class="bg-amber-50 hover:bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] font-bold">Hold</button>
+            <button type="button" onclick="confirmMarkOver('${safe(b.id)}', '${safe(b.patientName)}', '${safe(b.patientId || 'N/A')}', '${safe(b.tokenNumber || 'EMG-1')}', '${safe(b.doctorName || 'Emergency Team')}', '${safe(b.date || '')}')" class="bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1 rounded text-[10px] font-bold shadow">Over</button>
           </td>
         `);
         tbody.appendChild(tr);
@@ -5956,52 +6130,55 @@
 
     function setQueueStatus(bookingId, status) {
       const booking = patientBookings.find(b => b.id === bookingId);
-      const updates = { queueStatus: (booking && isEmergencyBooking(booking)) ? "Emergency Priority" : status };
-      db.ref('bookings/' + bookingId).update(updates).then(() => {
-        if (booking) Object.assign(booking, updates);
+      const newStatus = (booking && isEmergencyBooking(booking)) ? "Emergency Priority" : status;
+      if (booking) {
+        booking.queueStatus = newStatus;
         renderHospitalBookings();
-      });
+        renderPublicKiosk();
+      }
+      try {
+        db.ref('bookings/' + bookingId).update({ queueStatus: newStatus }).catch(err => console.warn("Firebase queue update note:", err));
+      } catch (e) {
+        console.warn("Queue status update warning:", e);
+      }
     }
 
     async function confirmMarkOver(bookingId, patientName, patientId, tokenNum, doctorName, dateStr, skipConfirm = false) {
       if (!skipConfirm && !confirm(`Complete OPD for ${tokenNum} (${patientName} - ID: ${patientId})?`)) return;
 
       try {
-        const bookingRef = db.ref('bookings/' + bookingId);
-        const snap = await bookingRef.once('value');
-        const booking = snap.val();
-        if (!booking) { alert('Token already completed.'); return; }
+        const localIdx = patientBookings.findIndex(b => b.id === bookingId);
+        const memBooking = localIdx !== -1 ? patientBookings[localIdx] : null;
 
-        const tx = await bookingRef.transaction(current => {
-          if (!current || current.queueStatus === 'Over') return;
-          return { ...current, queueStatus: 'Over', completedAt: Date.now() };
-        });
-
-        if (!tx.committed) return;
-
-        const completedBooking = tx.snapshot.val();
+        const finalToken = (memBooking && memBooking.tokenNumber) || tokenNum || '001';
+        const finalRaw = (memBooking && memBooking.rawToken) || (parseInt(finalToken, 10) || 1);
         const logId = 'log_' + String(bookingId).replace(/[^a-zA-Z0-9_-]/g, '_');
-        const finalToken = completedBooking.tokenNumber || tokenNum || '001';
-        const finalRaw = completedBooking.rawToken || (parseInt(finalToken, 10) || 1);
+        const effectiveDateStr = dateStr || (memBooking && memBooking.date) || new Date().toISOString().split('T')[0];
+
         const newLog = {
           id: logId,
           bookingId: bookingId,
-          time: `${dateStr} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+          time: `${effectiveDateStr} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
           tokenNumber: finalToken,
           rawToken: finalRaw,
-          hospital: completedBooking.hospital || currentHospitalName,
+          hospital: (memBooking && memBooking.hospital) || currentHospitalName,
           patientName: `${patientName} (${patientId})`,
           patientId: patientId,
-          visitNum: completedBooking.visitNum || "1",
-          doctor: doctorName,
-          purpose: completedBooking.priorityReason || ("Completed Consultation"),
+          visitNum: (memBooking && memBooking.visitNum) || "1",
+          doctor: doctorName || (memBooking && memBooking.doctorName) || 'Attending Doctor',
+          purpose: (memBooking && (memBooking.priorityReason || memBooking.visitReason)) || "OPD Consultation Completed",
           abha: "ABHA-Verified",
-          source: completedBooking.source || "OPD",
-          rfidUid: completedBooking.rfidUid || ""
+          source: (memBooking && memBooking.source) || "OPD",
+          rfidUid: (memBooking && memBooking.rfidUid) || ""
         };
 
-        await db.ref('logs/' + logId).set(newLog);
-        await bookingRef.remove();
+        // Optimistically update memory structures immediately
+        if (localIdx !== -1) {
+          patientBookings.splice(localIdx, 1);
+        }
+        if (!visitLogs.some(l => l.id === logId || l.bookingId === bookingId)) {
+          visitLogs.unshift(newLog);
+        }
 
         // Update active treated patient summary
         const uMatch = registeredUsers.find(u => u && u.patientId && String(u.patientId).toLowerCase() === String(patientId).toLowerCase());
@@ -6011,21 +6188,21 @@
           patientId: patientId,
           id: patientId,
           tokenNumber: finalToken,
-          gender: completedBooking.gender || uMatch?.gender || 'Male',
-          age: completedBooking.age || uMatch?.age || '32',
-          blood: completedBooking.blood || uMatch?.blood || 'O+',
-          phone: completedBooking.phone || uMatch?.phone || '+91 9876543210',
+          gender: (memBooking && memBooking.gender) || uMatch?.gender || 'Male',
+          age: (memBooking && memBooking.age) || uMatch?.age || '32',
+          blood: (memBooking && memBooking.blood) || uMatch?.blood || 'O+',
+          phone: (memBooking && memBooking.phone) || uMatch?.phone || '+91 9876543210',
           doctor: doctorName,
-          diagnosis: completedBooking.priorityReason || completedBooking.visitReason || newLog.purpose || 'OPD Consultation Completed',
-          purpose: completedBooking.priorityReason || completedBooking.visitReason || newLog.purpose || 'OPD Consultation Completed',
-          date: dateStr || new Date().toISOString().split('T')[0]
+          diagnosis: newLog.purpose,
+          purpose: newLog.purpose,
+          date: effectiveDateStr
         };
         updatePrintMedicalSummary(currentTreatedPatient);
 
         // ================= PRESERVE RFID CARD REGISTRATION PERMANENTLY =================
         // Patient's RFID card registration is permanently preserved in Firebase and local storage for all future visits.
         // Even after treatment completion, the card remains registered to this patient.
-        const rfidCardUid = completedBooking.rfidUid || "";
+        const rfidCardUid = (memBooking && memBooking.rfidUid) || "";
         if (rfidCardUid) {
           const cleanUid = rfidCardUid.replace(/\s+/g, "").toUpperCase();
           setRFIDDiagnostics(`RFID CARD PRESERVED: Tag ${cleanUid} remains permanently registered to ${patientName} (${patientId}) for future consultations.`, "success");
@@ -6035,7 +6212,17 @@
         renderHospitalBookings();
         renderHospitalLogs();
         renderPublicKiosk();
+
+        // Background sync to Firebase
+        try {
+          const bookingRef = db.ref('bookings/' + bookingId);
+          await bookingRef.remove();
+          await db.ref('logs/' + logId).set(newLog);
+        } catch (dbErr) {
+          console.warn("Firebase sync note on complete visit:", dbErr);
+        }
       } catch (error) {
+        console.error("Error completing visit:", error);
         alert('Could not complete visit: ' + error.message);
       }
     }
@@ -6064,7 +6251,7 @@
       tbody.innerHTML = '';
 
       if (uniqueLogs.length === 0) {
-        tbody.innerHTML = DOMPurify.sanitize(`<tr><td colspan="7" class="p-4 text-center text-slate-400">No OPD logs recorded yet.</td></tr>`);
+        setTableBodyHTML(tbody, `<tr><td colspan="7" class="p-6 text-center text-slate-400">No OPD logs recorded yet.</td></tr>`);
         return;
       }
 
@@ -6077,8 +6264,9 @@
         const attachedCount = patientReports.filter(r => r && String(r.patientId || '').toLowerCase() === String(pId).toLowerCase()).length;
 
         const tr = document.createElement('tr');
-        tr.innerHTML = DOMPurify.sanitize(`
-          <td class="p-3 font-mono text-slate-500 text-[11px]">${escapeHtml(log.time)}</td>
+        tr.className = "hover:bg-slate-50/70 transition border-b border-slate-100";
+        setTableRowHTML(tr, `
+          <td class="p-3 font-mono text-slate-500 text-[11px] whitespace-nowrap">${escapeHtml(log.time)}</td>
           <td class="p-3"><span class="font-black text-teal-950 bg-teal-50 px-2.5 py-0.5 rounded-lg border border-teal-200 font-mono">${escapeHtml(log.tokenNumber || '001')}</span></td>
           <td class="p-3">
             <p class="font-bold text-slate-900">${escapeHtml(pName)}</p>
